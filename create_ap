@@ -47,6 +47,7 @@ usage() {
     echo "  --mac-filter-deny       File containing MAC addresses to deny"
     echo "  --redirect-to-localhost If -n is set, redirect every DNS request to localhost (useful for public information networks)"
     echo "  --hostapd-debug <level> With level between 1 and 2, passes arguments -d or -dd to hostapd for debugging."
+    echo "  --hostapd-timestamps    Include timestamps in hostapd debug messages."
     echo "  --isolate-clients       Disable communication between clients"
     echo "  --ieee80211n            Enable IEEE 802.11n (HT)"
     echo "  --ieee80211ac           Enable IEEE 802.11ac (VHT)"
@@ -1106,7 +1107,7 @@ for ((i=0; i<$#; i++)); do
     fi
 done
 
-GETOPT_ARGS=$(getopt -o hc:w:g:de:nm: -l "help","hidden","hostapd-debug:","redirect-to-localhost","mac-filter-accept:","mac-filter-deny:","isolate-clients","ieee80211n","ieee80211ac","ht_capab:","vht_capab:","no-virt","fix-unmanaged","country:","timezone","gps:","freq-band:","mac:","dhcp-dns:","dhcp-dns6:","daemon","pidfile:","logfile:","stop:","list","list-running","list-clients:","version","psk","no-dns","no-dnsmasq","ipv6","mkconfig:","config:","wps","wps-pbc:","wps-pin:","metered","wep" -n "$PROGNAME" -- "$@")
+GETOPT_ARGS=$(getopt -o hc:w:g:de:nm: -l "help","hidden","hostapd-debug:","hostapd-timestamps","redirect-to-localhost","mac-filter-accept:","mac-filter-deny:","isolate-clients","ieee80211n","ieee80211ac","ht_capab:","vht_capab:","no-virt","fix-unmanaged","country:","timezone","gps:","freq-band:","mac:","dhcp-dns:","dhcp-dns6:","daemon","pidfile:","logfile:","stop:","list","list-running","list-clients:","version","psk","no-dns","no-dnsmasq","ipv6","mkconfig:","config:","wps","wps-pbc:","wps-pin:","metered","wep" -n "$PROGNAME" -- "$@")
 [[ $? -ne 0 ]] && exit 1
 eval set -- "$GETOPT_ARGS"
 
@@ -1313,14 +1314,18 @@ while :; do
         --hostapd-debug)
             shift
             if [ "x$1" = "x1" ]; then
-                HOSTAPD_DEBUG_ARGS="-d"
+                HOSTAPD_DEBUG_ARGS+="-d "
             elif [ "x$1" = "x2" ]; then
-                HOSTAPD_DEBUG_ARGS="-dd"
+                HOSTAPD_DEBUG_ARGS+="-dd "
             else
                 printf "Error: argument for --hostapd-debug expected 1 or 2, got %s\n" "$1"
                 exit 1
             fi
             shift
+            ;;
+        --hostapd-timestamps)
+            shift
+            HOSTAPD_DEBUG_ARGS+="-t "
             ;;
         --mkconfig)
             shift
