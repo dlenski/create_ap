@@ -2077,6 +2077,28 @@ if [[ "$SHARE_METHOD" != "bridge" ]]; then
     fi
 fi
 
+escape() {
+    local length="${#1}"
+    for (( i = 0; i < length; i++ )); do
+        local c="${1:i:1}"
+        case $c in
+            [\\\"\;\:\,]) echo -n "\\$c" ;;
+            *) echo -n "$c" ;;
+        esac
+    done
+}
+
+URI="WIFI:S:$(escape $SSID);"
+if [[ -n "$PASSPHRASE" ]]; then
+    URI+="T:WPA;P:$(escape $PASSPHRASE);"
+fi
+if [[ $HIDDEN -ne 0 ]]; then
+    URI+="H:true;"
+fi
+URI+=";"
+echo "$URI" >&2
+qrencode -t utf8 "$URI" >&2
+
 # start access point
 echo "hostapd command-line interface: hostapd_cli -p $CONFDIR/hostapd_ctrl"
 
