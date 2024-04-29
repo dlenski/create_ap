@@ -2146,16 +2146,19 @@ escape() {
     done
 }
 
-URI="WIFI:S:$(escape $SSID);"
-if [[ -n "$PASSPHRASE" ]]; then
-    URI+="T:WPA;P:$(escape $PASSPHRASE);"
+QRENCODE_PATH=`which qrencode`
+if [ $? -eq 0 ]; then
+    URI="WIFI:S:$(escape $SSID);"
+    if [[ -n "$PASSPHRASE" ]]; then
+        URI+="T:WPA;P:$(escape $PASSPHRASE);"
+    fi
+    if [[ $HIDDEN -ne 0 ]]; then
+        URI+="H:true;"
+    fi
+    URI+=";"
+    echo "WiFi connection QR code:"
+    qrencode -t utf8 "$URI" >&2
 fi
-if [[ $HIDDEN -ne 0 ]]; then
-    URI+="H:true;"
-fi
-URI+=";"
-echo "$URI" >&2
-qrencode -t utf8 "$URI" >&2
 
 # start access point
 echo "hostapd command-line interface: hostapd_cli -p $CONFDIR/hostapd_ctrl"
