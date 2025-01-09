@@ -55,6 +55,7 @@ usage() {
     echo "  --beacon-interval <ms>  Set beacon interval in milliseconds (default 100)"
     echo "  --dtim-period <num>     Set DTIM period in numbers of beacons (default 2)"
     echo "  --country <code>        Set two-letter country code for 802.11d regulatory domain (example: US)"
+    echo "  --timezone              Advertise local timezone in beacons (following 802.11v-2011 7.3.2.87)"
     echo "  --freq-band <GHz>       Set frequency band. Valid inputs: 2.4, 5 (default: 2.4)"
     echo "  --driver                Choose your WiFi adapter driver (default: nl80211)"
     echo "  --no-virt               Do not create virtual interface"
@@ -657,6 +658,7 @@ VHT_CAPAB=
 DRIVER=nl80211
 NO_VIRT=0
 COUNTRY=
+TIMEZONE=
 FREQ_BAND=2.4
 BEACON_INTERVAL=100
 DTIM_PERIOD=2
@@ -672,7 +674,7 @@ HOSTAPD_DEBUG_ARGS=
 REDIRECT_TO_LOCALHOST=0
 
 CONFIG_OPTS=(CHANNEL GATEWAY WPA_VERSION ETC_HOSTS DHCP_DNS DHCP_DNS6 NO_DNS NO_DNSMASQ HIDDEN MAC_FILTER MAC_FILTER_ACCEPT ISOLATE_CLIENTS
-             SHARE_METHOD IEEE80211N IEEE80211AC HT_CAPAB VHT_CAPAB DRIVER NO_VIRT COUNTRY FREQ_BAND
+             SHARE_METHOD IEEE80211N IEEE80211AC HT_CAPAB VHT_CAPAB DRIVER NO_VIRT COUNTRY TIMEZONE FREQ_BAND
              NEW_MACADDR DAEMONIZE DAEMON_PIDFILE DAEMON_LOGFILE WIFI_IFACE INTERNET_IFACE
              SSID PASSPHRASE USE_PSK BEACON_INTERVAL DTIM_PERIOD IPV6 ADDN_HOSTS WPS METERED)
 
@@ -1130,7 +1132,7 @@ for ((i=0; i<$#; i++)); do
     fi
 done
 
-GETOPT_ARGS=$(getopt -o hc:w:g:de:nm: -l "help","hidden","hostapd-debug:","redirect-to-localhost","mac-filter","mac-filter-accept:","isolate-clients","ieee80211n","ieee80211ac","ht_capab:","vht_capab:","driver:","no-virt","fix-unmanaged","country:","freq-band:","mac:","dhcp-dns:","dhcp-dns6:","daemon","pidfile:","logfile:","stop:","list","list-running","list-clients:","version","psk","no-dns","no-dnsmasq","ipv6","mkconfig:","config:","wps","wps-pbc:","wps-pin:","metered" -n "$PROGNAME" -- "$@")
+GETOPT_ARGS=$(getopt -o hc:w:g:de:nm: -l "help","hidden","hostapd-debug:","redirect-to-localhost","mac-filter","mac-filter-accept:","isolate-clients","ieee80211n","ieee80211ac","ht_capab:","vht_capab:","driver:","no-virt","fix-unmanaged","country:","timezone","freq-band:","mac:","dhcp-dns:","dhcp-dns6:","daemon","pidfile:","logfile:","stop:","list","list-running","list-clients:","version","psk","no-dns","no-dnsmasq","ipv6","mkconfig:","config:","wps","wps-pbc:","wps-pin:","metered" -n "$PROGNAME" -- "$@")
 [[ $? -ne 0 ]] && exit 1
 eval set -- "$GETOPT_ARGS"
 
@@ -1238,6 +1240,10 @@ while :; do
             shift
             COUNTRY="$1"
             shift
+            ;;
+        --timezone)
+            shift
+            TIMEZONE=1
             ;;
         --freq-band)
             shift
@@ -1777,18 +1783,20 @@ dtim_period=${DTIM_PERIOD}
 #manufacturer=Vark
 EOF
 
+VENDOR_ELEMENTS=""
 if [[ $METERED -ne 0 ]]; then
     # Add Microsoft's "network cost information element"
     # (https://learn.microsoft.com/fi-fi/windows-hardware/drivers/mobilebroadband/network-cost-information-element)
     # and Apple's vendor element that indicates a personal hotspot
     # (https://apple.stackexchange.com/questions/199163/how-does-ios-and-os-x-detect-when-a-wi-fi-network-is-a-personal-hotspot)
     # The Microsoft element seems to be quasi-standardized now.
+    VENDOR_ELEMENTS+="dd080050f21102000002"
 
     # We intentionally set the last byte (which is reserved and
     # supposed to always be 00) to 02 in order to work around a bug caused by
     # previously-incorrect documentation by Microsoft. See:
     # https://openwrt.org/docs/guide-user/network/wifi/ms-meteredconnection#under_the_hood
-    echo "vendor_elements=dd080050f21102000002dd0a0017f206010103010000" >> $CONFDIR/hostapd.conf
+    VENDOR_ELEMENTS+="dd0a0017f206010103010000"
 fi
 
 if [[ $WPS -eq 1 ]]; then
@@ -1815,6 +1823,25 @@ if [[ -n "$COUNTRY" ]]; then
 country_code=${COUNTRY}
 ieee80211d=1
 EOF
+fi
+
+if [[ -n "$TIMEZONE" ]]; then
+    # FIXME: This capability was added to hostapd in
+    # https://chromium.googlesource.com/external/w1.fi/cgit/hostap/+/39b97072b2a45551e6f20e6251eeaca269f22a2d%5E%21/#F1
+    # with the 'time_zone' variable, but appears to be broken in hostapd v2.9
+
+    # Per 802.11v-2011 7.3.2.87, the timezone is supposed to be specified via tag 98 (0x62)
+    # as a string in "POSIX format" (https://developer.ibm.com/articles/au-aix-posix/#understanding-the-posix-format3).
+    # Happily, the POSIX format timezone is easily extracted from the tzfile (https://stackoverflow.com/a/67045287),
+    # and /etc/localtime is a symlink to such a file.
+    POSIXTZ=$(tail -n1 /etc/localtime)
+    TZNAME=$(readlink -f /etc/localtime | sed -e 's|^.*/zoneinfo/||')
+    VENDOR_ELEMENTS+=$(printf "62%02x" ${#POSIXTZ})$(echo -n "$POSIXTZ" | xxd -p)
+    echo "Kludging timezone tag (802.11v-2011 7.3.2.87) for POSIX timezone '$POSIXTZ' ($TZNAME) into beacon via vendor_elements" >&2
+
+    # If/when 'time_zone' variable in hostapd.conf is fixed:
+    #echo "time_advertisement=2" >> $CONFDIR/hostapd.conf
+    #echo "time_zone=$POSIXTZ" >> $CONFDIR/hostapd.conf
 fi
 
 if [[ $FREQ_BAND == 2.4 ]]; then
@@ -1863,6 +1890,10 @@ wpa_key_mgmt=WPA-PSK
 wpa_pairwise=TKIP CCMP
 rsn_pairwise=CCMP
 EOF
+fi
+
+if [[ -n "$VENDOR_ELEMENTS" ]]; then
+    echo "vendor_elements=$VENDOR_ELEMENTS" >> $CONFDIR/hostapd.conf
 fi
 
 if [[ "$SHARE_METHOD" == "bridge" ]]; then
