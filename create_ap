@@ -56,6 +56,7 @@ usage() {
     echo "  --dtim-period <num>     Set DTIM period in numbers of beacons (default 2)"
     echo "  --country <code>        Set two-letter country code for 802.11d regulatory domain (example: US)"
     echo "  --timezone              Advertise local timezone in beacons (following 802.11v-2011 7.3.2.87)"
+    echo "  --gps <LAT,LNG>         Advertise location in beacons (coordinates are in 10^5 degree)"
     echo "  --freq-band <GHz>       Set frequency band. Valid inputs: 2.4, 5 (default: 2.4)"
     echo "  --driver                Choose your WiFi adapter driver (default: nl80211)"
     echo "  --no-virt               Do not create virtual interface"
@@ -659,6 +660,7 @@ DRIVER=nl80211
 NO_VIRT=0
 COUNTRY=
 TIMEZONE=
+GPS=
 FREQ_BAND=2.4
 BEACON_INTERVAL=100
 DTIM_PERIOD=2
@@ -674,7 +676,7 @@ HOSTAPD_DEBUG_ARGS=
 REDIRECT_TO_LOCALHOST=0
 
 CONFIG_OPTS=(CHANNEL GATEWAY WPA_VERSION ETC_HOSTS DHCP_DNS DHCP_DNS6 NO_DNS NO_DNSMASQ HIDDEN MAC_FILTER MAC_FILTER_ACCEPT ISOLATE_CLIENTS
-             SHARE_METHOD IEEE80211N IEEE80211AC HT_CAPAB VHT_CAPAB DRIVER NO_VIRT COUNTRY TIMEZONE FREQ_BAND
+             SHARE_METHOD IEEE80211N IEEE80211AC HT_CAPAB VHT_CAPAB DRIVER NO_VIRT COUNTRY TIMEZONE GPS FREQ_BAND
              NEW_MACADDR DAEMONIZE DAEMON_PIDFILE DAEMON_LOGFILE WIFI_IFACE INTERNET_IFACE
              SSID PASSPHRASE USE_PSK BEACON_INTERVAL DTIM_PERIOD IPV6 ADDN_HOSTS WPS METERED)
 
@@ -1132,7 +1134,7 @@ for ((i=0; i<$#; i++)); do
     fi
 done
 
-GETOPT_ARGS=$(getopt -o hc:w:g:de:nm: -l "help","hidden","hostapd-debug:","redirect-to-localhost","mac-filter","mac-filter-accept:","isolate-clients","ieee80211n","ieee80211ac","ht_capab:","vht_capab:","driver:","no-virt","fix-unmanaged","country:","timezone","freq-band:","mac:","dhcp-dns:","dhcp-dns6:","daemon","pidfile:","logfile:","stop:","list","list-running","list-clients:","version","psk","no-dns","no-dnsmasq","ipv6","mkconfig:","config:","wps","wps-pbc:","wps-pin:","metered" -n "$PROGNAME" -- "$@")
+GETOPT_ARGS=$(getopt -o hc:w:g:de:nm: -l "help","hidden","hostapd-debug:","redirect-to-localhost","mac-filter","mac-filter-accept:","isolate-clients","ieee80211n","ieee80211ac","ht_capab:","vht_capab:","driver:","no-virt","fix-unmanaged","country:","timezone","gps:","freq-band:","mac:","dhcp-dns:","dhcp-dns6:","daemon","pidfile:","logfile:","stop:","list","list-running","list-clients:","version","psk","no-dns","no-dnsmasq","ipv6","mkconfig:","config:","wps","wps-pbc:","wps-pin:","metered" -n "$PROGNAME" -- "$@")
 [[ $? -ne 0 ]] && exit 1
 eval set -- "$GETOPT_ARGS"
 
@@ -1244,6 +1246,11 @@ while :; do
         --timezone)
             shift
             TIMEZONE=1
+            ;;
+        --gps)
+            shift
+            GPS="$1"
+            shift
             ;;
         --freq-band)
             shift
@@ -1890,6 +1897,26 @@ wpa_key_mgmt=WPA-PSK
 wpa_pairwise=TKIP CCMP
 rsn_pairwise=CCMP
 EOF
+fi
+
+if [[ -n "$GPS" ]]; then
+    # The format is defined in this French law requiring UAVs/drones to broadcast
+    # their GPS position and heading via WiFi beacons:
+    # https://www.legifrance.gouv.fr/eli/arrete/2019/12/27/ECOI1934044A/jo/texte
+    # Wireshark dissector clarifies some things:
+    # https://gitlab.com/wireshark/wireshark/commit/7ed3180
+    # Other fields such as "takeoff" coords, takeoff-relative altitude, and heading seem pointless
+    # for a non-aircraft application.
+
+    IFS=, read LAT LNG <<< "$GPS"
+    [[ $LAT -lt 0 ]] && LAT=$((0x100000000+$LAT))
+    [[ $LNG -lt 0 ]] && LNG=$((0x100000000+$LNG))
+    VENDOR_ELEMENTS+="dd136a5c3501"
+    VENDOR_ELEMENTS+="010101"        # version (01) = 01 "sa valeur est fixée à 1"
+    VENDOR_ELEMENTS+=$(printf "0404%08x" $LAT)  # current latitude (+N,-S) in 10^-5 degrees
+    VENDOR_ELEMENTS+=$(printf "0504%08x" $LNG)  # current longitude (+W,-E) in 10^-5 degrees
+    #VENDOR_ELEMENTS+="06020000"     # absolute altitude in m
+    #VENDOR_ELEMENTS+="0a0100"       # horizontal speed in m/s
 fi
 
 if [[ -n "$VENDOR_ELEMENTS" ]]; then
