@@ -303,6 +303,18 @@ get_adapter_kernel_module() {
     echo ${MODULE##*/}
 }
 
+can_do_80211w() {
+    local PHY
+    PHY=$(get_phy_device "$1")
+    [[ $? -ne 0 ]] && return 1
+    if [[ $USE_IWCONFIG -eq 1 ]]; then
+        # https://askubuntu.com/a/1445236
+        grep -q MFP_CAPABLE /sys/kernel/debug/ieee80211/${PHY}/hwflags
+    else
+        iw phy $PHY info | grep -q 'CMAC (00-0f-ac:6)'
+    fi
+}
+
 can_be_sta_and_ap() {
     # iwconfig does not provide this information, assume false
     [[ $USE_IWCONFIG -eq 1 ]] && return 1
@@ -1488,6 +1500,16 @@ if ! can_be_sta_and_ap ${WIFI_IFACE}; then
     elif [[ $NO_VIRT -eq 0 ]]; then
         echo "WARN: Your adapter does not fully support AP virtual interface, enabling --no-virt" >&2
         NO_VIRT=1
+    fi
+fi
+
+if [[ "$WPA_VERSION" = *3* ]] && ! can_do_80211w ${WIFI_IFACE}; then
+    if [[ "$WPA_VERSION" = 3 ]]; then
+        echo "ERROR: Your adapter does not support protected management frames (802.11w), no WPA3" >&2
+        exit 1
+    else
+        echo "WARN: Your adapter does not support protected management frames (802.11w), disabling WPA3" >&2
+        WPA_VERSION="${WPA_VERSION/3}"
     fi
 fi
 
