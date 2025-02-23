@@ -32,7 +32,7 @@ usage() {
     echo "  -h, --help              Show this help"
     echo "  --version               Print version number"
     echo "  -c <channel>            Channel number (default: 1)"
-    echo "  -w <WPA version>        Use 1 for WPA, use 2 for WPA2, use 1+2 for both (default: 1+2)"
+    echo "  -w <WPA version>        Use 1 for WPA, use 2 for WPA2, use 3 for WPA3, use 1+2+3 for all (default: 2+3)"
     echo "  -n                      Disable Internet sharing (if you use this, don't pass"
     echo "                          the <interface-with-internet> argument)"
     echo "  -m <method>             Method for Internet sharing."
@@ -638,7 +638,7 @@ networkmanager_wait_until_unmanaged() {
 
 CHANNEL=default
 GATEWAY=192.168.12.1
-WPA_VERSION=1+2
+WPA_VERSION=2+3
 ETC_HOSTS=0
 ADDN_HOSTS=
 DHCP_DNS=gateway
@@ -1173,7 +1173,6 @@ while :; do
         -w)
             shift
             WPA_VERSION="$1"
-            [[ "$WPA_VERSION" == "2+1" ]] && WPA_VERSION=1+2
             shift
             ;;
         -g)
@@ -1884,20 +1883,31 @@ if [[ $IEEE80211N -eq 1 ]] || [[ $IEEE80211AC -eq 1 ]]; then
 fi
 
 if [[ -n "$PASSPHRASE" ]]; then
-    [[ "$WPA_VERSION" == "1+2" ]] && WPA_VERSION=3
     if [[ $USE_PSK -eq 0 ]]; then
         WPA_KEY_TYPE=passphrase
     else
         WPA_KEY_TYPE=psk
     fi
-    cat << EOF >> $CONFDIR/hostapd.conf
-wpa=${WPA_VERSION}
+    case "$WPA_VERSION" in
+    1)   wpa=1; wpapw=TKIP ;;
+    *1*) wpa=3; wpapw="TKIP CCMP" ;;
+    *)   wpa=2; wpapw=CCMP ;;
+    esac
+    case "$WPA_VERSION" in
+    3)   wpaw=2; wpakm="SAE" ;;
+    *3*) wpaw=1; wpakm="WPA-PSK WPA-PSK-SHA256 SAE" ;;
+    *)   wpaw=0; wpakm="WPA-PSK WPA-PSK-SHA256" ;;
+    esac
+    cat <<EOF >> $CONFDIR/hostapd.conf
+wpa=$wpa
 wpa_${WPA_KEY_TYPE}=${PASSPHRASE}
-wpa_key_mgmt=WPA-PSK
-wpa_pairwise=TKIP CCMP
+wpa_key_mgmt=$wpakm
+wpa_pairwise=$wpapw
 rsn_pairwise=CCMP
+ieee80211w=$wpaw
 EOF
 fi
+
 
 if [[ -n "$GPS" ]]; then
     # The format is defined in this French law requiring UAVs/drones to broadcast
@@ -2155,6 +2165,7 @@ if [ $? -eq 0 ]; then
     if [[ $HIDDEN -ne 0 ]]; then
         URI+="H:true;"
     fi
+    # If the AP is WPA3-only, should we add the transition-disable indicator? "R:1;" (https://superuser.com/a/1752085)
     URI+=";"
     echo "WiFi connection QR code:"
     qrencode -t utf8 "$URI" >&2
