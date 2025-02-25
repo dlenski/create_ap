@@ -330,6 +330,12 @@ can_be_sta_and_ap() {
     return 1
 }
 
+can_be_multi_channel() {
+    # iwconfig does not provide this information, assume false
+    [[ $USE_IWCONFIG -eq 1 ]] && return 1
+    get_adapter_info "$1" | grep -E '#channels <= [2-9]+' > /dev/null 2>&1
+}
+
 can_be_ap() {
     # iwconfig does not provide this information, assume true
     [[ $USE_IWCONFIG -eq 1 ]] && return 0
@@ -1733,16 +1739,21 @@ if [[ $NO_VIRT -eq 0 ]]; then
         WIFI_IFACE_FREQ=$(iw dev ${WIFI_IFACE} link | grep -i freq | awk '{print $2}')
         WIFI_IFACE_CHANNEL=$(ieee80211_frequency_to_channel ${WIFI_IFACE_FREQ})
         echo -n "${WIFI_IFACE} is already associated with channel ${WIFI_IFACE_CHANNEL} (${WIFI_IFACE_FREQ} MHz)"
-        if is_5ghz_frequency $WIFI_IFACE_FREQ; then
-            FREQ_BAND=5
+        if can_be_multi_channel ${WIFI_IFACE}; then
+            echo ", allowing because adapter supports multiple simultaneous channels"
+            echo "WARN: This may result in poor or unreliable performance." >&2
         else
-            FREQ_BAND=2.4
-        fi
-        if [[ $WIFI_IFACE_CHANNEL -ne $CHANNEL ]]; then
-            echo ", fallback to channel ${WIFI_IFACE_CHANNEL}"
-            CHANNEL=$WIFI_IFACE_CHANNEL
-        else
-            echo
+            if is_5ghz_frequency $WIFI_IFACE_FREQ; then
+                FREQ_BAND=5
+            else
+                FREQ_BAND=2.4
+            fi
+            if [[ $WIFI_IFACE_CHANNEL -ne $CHANNEL ]]; then
+                echo ", fallback to channel ${WIFI_IFACE_CHANNEL}"
+                CHANNEL=$WIFI_IFACE_CHANNEL
+            else
+                echo
+            fi
         fi
     fi
 
