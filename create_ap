@@ -726,6 +726,8 @@ _cleanup() {
         fi
     done
 
+    # if we are the last create_ap instance using this Internet-facing
+    # interface, then set back common values for that interface
     if [[ $found -eq 0 ]]; then
         cp -f $COMMON_CONFDIR/${INTERNET_IFACE}_forwarding \
            /proc/sys/net/ipv4/conf/$INTERNET_IFACE/forwarding
@@ -891,7 +893,7 @@ clean_exit() {
 list_running_conf() {
     local x
     mutex_lock
-    for x in /tmp/create_ap.*; do
+    for x in /run/create_ap.*; do
         if [[ -f $x/pid && -f $x/wifi_iface && -d /proc/$(cat $x/pid) ]]; then
             echo $x
         fi
@@ -1029,7 +1031,7 @@ has_running_instance() {
     local PID x
 
     mutex_lock
-    for x in /tmp/create_ap.*; do
+    for x in /run/create_ap.*; do
         if [[ -f $x/pid ]]; then
             PID=$(cat $x/pid)
             if [[ -d /proc/$PID ]]; then
@@ -1654,21 +1656,10 @@ fi
 
 mutex_lock
 trap "cleanup" EXIT
-CONFDIR=$(mktemp -d /tmp/create_ap.${WIFI_IFACE}.conf.XXXXXXXX)
-echo "Config dir: $CONFDIR"
-echo "PID: $$"
-echo $$ > $CONFDIR/pid
-
-# to make --list-running work from any user, we must give read
-# permissions to $CONFDIR and $CONFDIR/pid
-chmod 755 $CONFDIR
-chmod 444 $CONFDIR/pid
-
-COMMON_CONFDIR=/tmp/create_ap.common.conf
+COMMON_CONFDIR=/run/create_ap.common.conf
 mkdir -p $COMMON_CONFDIR
 
 if [[ "$SHARE_METHOD" == "nat" ]]; then
-    echo $INTERNET_IFACE > $CONFDIR/nat_internet_iface
     cp_n /proc/sys/net/ipv4/conf/$INTERNET_IFACE/forwarding \
        $COMMON_CONFDIR/${INTERNET_IFACE}_forwarding
     cp_n /proc/sys/net/ipv6/conf/all/forwarding \
@@ -1766,8 +1757,18 @@ else
 fi
 
 mutex_lock
+CONFDIR=/run/create_ap.${WIFI_IFACE}.conf
+mkdir $CONFDIR || die "Config dir $CONFDIR already exists. Previous $PROGNAME instance may have crashed without cleanup!"
+echo "Config dir: $CONFDIR"
+echo "PID: $$"
+echo $$ > $CONFDIR/pid
 echo $WIFI_IFACE > $CONFDIR/wifi_iface
-chmod 444 $CONFDIR/wifi_iface
+[[ "$SHARE_METHOD" == "nat" ]] && echo $INTERNET_IFACE > $CONFDIR/nat_internet_iface
+
+# to make --list-running work from any user, we must give read
+# permissions to $CONFDIR, $CONFDIR/pid, and $CONFDIR/wifi_iface
+chmod 755 $CONFDIR
+chmod 444 $CONFDIR/pid $CONFDIR/wifi_iface
 mutex_unlock
 
 if [[ -n "$COUNTRY" && $USE_IWCONFIG -eq 0 ]]; then
