@@ -716,6 +716,7 @@ _cleanup() {
         [[ -f $x ]] && kill -9 $(cat $x)
     done
 
+    rm -f "/lib/systemd/system-sleep/create_ap.${WIFI_IFACE}.resume"
     rm -rf $CONFDIR
 
     local found=0
@@ -1809,6 +1810,24 @@ dtim_period=${DTIM_PERIOD}
 #device_name=Fnord
 #manufacturer=Vark
 EOF
+
+# hostapd resume-after-suspend
+if [[ -d /lib/systemd/system-sleep ]]; then
+    resumer="/lib/systemd/system-sleep/create_ap.${WIFI_IFACE}.resume"
+    cat << EOF > "$resumer"
+#!/bin/sh
+# After resuming, ensure hostapd is still sending beacons, and if it's not then
+# disable and reenable to ensure AP continues working
+if [ "\$1" = post ]; then
+    if [ OK != \`hostapd_cli -i "${WIFI_IFACE}" -p "$CONFDIR/hostapd_ctrl" update_beacon\` ]; then
+        hostapd_cli -i "${WIFI_IFACE}" -p "$CONFDIR/hostapd_ctrl" disable
+        hostapd_cli -i "${WIFI_IFACE}" -p "$CONFDIR/hostapd_ctrl" enable
+    fi
+fi
+EOF
+    chmod 755 "$resumer"
+    echo "Installed systemd resume-after-suspend handler in $resumer"
+fi
 
 VENDOR_ELEMENTS=""
 if [[ $METERED -ne 0 ]]; then
