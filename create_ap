@@ -33,6 +33,7 @@ usage() {
     echo "  --version               Print version number"
     echo "  -c <channel>            Channel number (default: 1)"
     echo "  -w <WPA version>        Use 1 for WPA, use 2 for WPA2, use 3 for WPA3, use 1+2+3 for all (default: 2+3)"
+    # --wep is intentionally hidden because it's obviously insecure
     echo "  -n                      Disable Internet sharing (if you use this, don't pass"
     echo "                          the <interface-with-internet> argument)"
     echo "  -m <method>             Method for Internet sharing."
@@ -644,6 +645,7 @@ networkmanager_wait_until_unmanaged() {
 CHANNEL=default
 GATEWAY=192.168.12.1
 WPA_VERSION=2+3
+WEP=0
 ETC_HOSTS=0
 ADDN_HOSTS=
 DHCP_DNS=gateway
@@ -681,10 +683,10 @@ WPS=0
 HOSTAPD_DEBUG_ARGS=
 REDIRECT_TO_LOCALHOST=0
 
-CONFIG_OPTS=(CHANNEL GATEWAY WPA_VERSION ETC_HOSTS DHCP_DNS DHCP_DNS6 NO_DNS NO_DNSMASQ HIDDEN MAC_FILTER MAC_FILTER_ACCEPT ISOLATE_CLIENTS
+CONFIG_OPTS=(CHANNEL GATEWAY WPA_VERSION WEP ETC_HOSTS DHCP_DNS DHCP_DNS6 NO_DNS NO_DNSMASQ HIDDEN MAC_FILTER MAC_FILTER_ACCEPT ISOLATE_CLIENTS
              SHARE_METHOD IEEE80211N IEEE80211AC HT_CAPAB VHT_CAPAB DRIVER NO_VIRT COUNTRY TIMEZONE GPS FREQ_BAND
              NEW_MACADDR DAEMONIZE DAEMON_PIDFILE DAEMON_LOGFILE WIFI_IFACE INTERNET_IFACE
-             SSID PASSPHRASE USE_PSK BEACON_INTERVAL DTIM_PERIOD IPV6 ADDN_HOSTS WPS METERED)
+             SSID PASSPHRASE USE_PSK BEACON_INTERVAL DTIM_PERIOD IPV6 ADDN_HOSTS WPS METERED WEP)
 
 FIX_UNMANAGED=0
 LIST_RUNNING=0
@@ -1143,7 +1145,7 @@ for ((i=0; i<$#; i++)); do
     fi
 done
 
-GETOPT_ARGS=$(getopt -o hc:w:g:de:nm: -l "help","hidden","hostapd-debug:","redirect-to-localhost","mac-filter-accept:","mac-filter-deny:","isolate-clients","ieee80211n","ieee80211ac","ht_capab:","vht_capab:","driver:","no-virt","fix-unmanaged","country:","timezone","gps:","freq-band:","mac:","dhcp-dns:","dhcp-dns6:","daemon","pidfile:","logfile:","stop:","list","list-running","list-clients:","version","psk","no-dns","no-dnsmasq","ipv6","mkconfig:","config:","wps","wps-pbc:","wps-pin:","metered" -n "$PROGNAME" -- "$@")
+GETOPT_ARGS=$(getopt -o hc:w:g:de:nm: -l "help","hidden","hostapd-debug:","redirect-to-localhost","mac-filter-accept:","mac-filter-deny:","isolate-clients","ieee80211n","ieee80211ac","ht_capab:","vht_capab:","driver:","no-virt","fix-unmanaged","country:","timezone","gps:","freq-band:","mac:","dhcp-dns:","dhcp-dns6:","daemon","pidfile:","logfile:","stop:","list","list-running","list-clients:","version","psk","no-dns","no-dnsmasq","ipv6","mkconfig:","config:","wps","wps-pbc:","wps-pin:","metered","wep" -n "$PROGNAME" -- "$@")
 [[ $? -ne 0 ]] && exit 1
 eval set -- "$GETOPT_ARGS"
 
@@ -1184,6 +1186,12 @@ while :; do
             shift
             WPA_VERSION="$1"
             shift
+            ;;
+        --wep)
+            shift
+            WEP=1
+            WPA_VERSION=
+            echo -e "WARN: WEP is insecure and obsolete and should only be used for testing or research" >&2
             ;;
         -g)
             shift
@@ -1931,22 +1939,34 @@ if [[ $IEEE80211N -eq 1 ]] || [[ $IEEE80211AC -eq 1 ]]; then
 fi
 
 if [[ -n "$PASSPHRASE" ]]; then
-    if [[ $USE_PSK -eq 0 ]]; then
-        WPA_KEY_TYPE=passphrase
+    if [[ $WEP -eq 1 ]]; then
+        if [[ $USE_PSK -eq 1 ]]; then
+            psk="${PASSPHRASE}"
+        else
+            case ${#PASSPHRASE} in
+            5) ;; 13) ;; 16) ;;
+            *) die "WEP password must be 5, 13, or 16 characters in length" ;;
+            esac
+            psk="\"${PASSPHRASE}\""
+        fi
+        echo "wep_key0=${psk}" >> $CONFDIR/hostapd.conf
     else
-        WPA_KEY_TYPE=psk
-    fi
-    case "$WPA_VERSION" in
-    1)   wpa=1; wpapw=TKIP ;;
-    *1*) wpa=3; wpapw="TKIP CCMP" ;;
-    *)   wpa=2; wpapw=CCMP ;;
-    esac
-    case "$WPA_VERSION" in
-    3)   wpaw=2; wpakm="SAE" ;;
-    *3*) wpaw=1; wpakm="WPA-PSK WPA-PSK-SHA256 SAE" ;;
-    *)   wpaw=0; wpakm="WPA-PSK WPA-PSK-SHA256" ;;
-    esac
-    cat <<EOF >> $CONFDIR/hostapd.conf
+        if [[ $USE_PSK -eq 0 ]]; then
+            WPA_KEY_TYPE=passphrase
+        else
+            WPA_KEY_TYPE=psk
+        fi
+        case "$WPA_VERSION" in
+        1)   wpa=1; wpapw=TKIP ;;
+        *1*) wpa=3; wpapw="TKIP CCMP" ;;
+        *)   wpa=2; wpapw=CCMP ;;
+        esac
+        case "$WPA_VERSION" in
+        3)   wpaw=2; wpakm="SAE" ;;
+        *3*) wpaw=1; wpakm="WPA-PSK WPA-PSK-SHA256 SAE" ;;
+        *)   wpaw=0; wpakm="WPA-PSK WPA-PSK-SHA256" ;;
+        esac
+        cat <<EOF >> $CONFDIR/hostapd.conf
 wpa=$wpa
 wpa_${WPA_KEY_TYPE}=${PASSPHRASE}
 wpa_key_mgmt=$wpakm
@@ -1954,6 +1974,7 @@ wpa_pairwise=$wpapw
 rsn_pairwise=CCMP
 ieee80211w=$wpaw
 EOF
+    fi
 fi
 
 
