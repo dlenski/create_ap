@@ -24,7 +24,6 @@ This project is a fork of the no-longer-maintained [oblique/create_ap](//github.
     fail unpredictably due to [a RNG bug](https://packetstormsecurity.com/files/156573/Hostapd-Insufficient-Entropy.html).
 * iproute2
 * iw
-* iwconfig (you only need this if 'iw' can not recognize your adapter)
 
 ### For 'NATed' or 'None' Internet sharing method
 * dnsmasq

@@ -7,7 +7,6 @@
 #    hostapd
 #    iproute2
 #    iw
-#    iwconfig (you only need this if 'iw' can not recognize your adapter)
 
 # dependencies for 'nat' or 'none' Internet sharing method
 #    dnsmasq
@@ -251,8 +250,6 @@ version_cmp() {
     return 0
 }
 
-USE_IWCONFIG=0
-
 is_interface() {
     [[ -z "$1" ]] && return 1
     [[ -d "/sys/class/net/${1}" ]]
@@ -260,10 +257,6 @@ is_interface() {
 
 is_wifi_interface() {
     which iw > /dev/null 2>&1 && iw dev $1 info > /dev/null 2>&1 && return 0
-    if which iwconfig > /dev/null 2>&1 && iwconfig $1 > /dev/null 2>&1; then
-        USE_IWCONFIG=1
-        return 0
-    fi
     return 1
 }
 
@@ -295,17 +288,14 @@ can_do_80211w() {
     local PHY
     PHY=$(get_phy_device "$1")
     [[ $? -ne 0 ]] && return 1
-    if [[ $USE_IWCONFIG -eq 1 ]]; then
-        # https://askubuntu.com/a/1445236
-        grep -q MFP_CAPABLE /sys/kernel/debug/ieee80211/${PHY}/hwflags
-    else
-        iw phy $PHY info | grep -q 'CMAC (00-0f-ac:6)'
-    fi
+    # Per https://kevinlocke.name/bits/2019/12/28/checking-802.11w-support, debugfs
+    # is the most reliable way to detect 802.11, aka management frame protection.
+    # Grep iw output as a fallback.
+    grep -q MFP_CAPABLE /sys/kernel/debug/ieee80211/${PHY}/hwflags && return 0
+    get_adapter_info "$PHY" | grep -q 'CMAC (00-0f-ac:6)'
 }
 
 can_be_sta_and_ap() {
-    # iwconfig does not provide this information, assume false
-    [[ $USE_IWCONFIG -eq 1 ]] && return 1
     if [[ "$(get_adapter_kernel_module "$1")" == "brcmfmac" ]]; then
         echo "WARN: brmfmac driver doesn't work properly with virtual interfaces and" >&2
         echo "      it can cause kernel panic. For this reason we disallow virtual" >&2
@@ -319,16 +309,11 @@ can_be_sta_and_ap() {
 }
 
 can_be_multi_channel() {
-    # iwconfig does not provide this information, assume false
-    [[ $USE_IWCONFIG -eq 1 ]] && return 1
     get_adapter_info "$1" | grep -E '#channels <= [2-9]+' > /dev/null 2>&1
 }
 
 can_be_ap() {
-    # iwconfig does not provide this information, assume true
-    [[ $USE_IWCONFIG -eq 1 ]] && return 0
-    get_adapter_info "$1" | grep -E '\* AP$' > /dev/null 2>&1 && return 0
-    return 1
+    get_adapter_info "$1" | grep -E '\* AP$' > /dev/null 2>&1
 }
 
 can_transmit_to_channel() {
@@ -336,22 +321,15 @@ can_transmit_to_channel() {
     IFACE=$1
     CHANNEL_NUM=$2
 
-    if [[ $USE_IWCONFIG -eq 0 ]]; then
-        if [[ $FREQ_BAND == 2.4 ]]; then
-            CHANNEL_INFO=$(get_adapter_info ${IFACE} | grep " 24[0-9][0-9]\(\.0\+\)\? MHz \[${CHANNEL_NUM}\]")
-        else
-            CHANNEL_INFO=$(get_adapter_info ${IFACE} | grep " \(49[0-9][0-9]\|5[0-9]\{3\}\)\(\.0\+\)\? MHz \[${CHANNEL_NUM}\]")
-        fi
-        [[ -z "${CHANNEL_INFO}" ]] && return 1
-        [[ "${CHANNEL_INFO}" == *no\ IR* ]] && return 1
-        [[ "${CHANNEL_INFO}" == *disabled* ]] && return 1
-        return 0
+    if [[ $FREQ_BAND == 2.4 ]]; then
+        CHANNEL_INFO=$(get_adapter_info ${IFACE} | grep " 24[0-9][0-9]\(\.0\+\)\? MHz \[${CHANNEL_NUM}\]")
     else
-        CHANNEL_NUM=$(printf '%02d' ${CHANNEL_NUM})
-        CHANNEL_INFO=$(iwlist ${IFACE} channel | grep -E "Channel[[:blank:]]${CHANNEL_NUM}[[:blank:]]?:")
-        [[ -z "${CHANNEL_INFO}" ]] && return 1
-        return 0
+        CHANNEL_INFO=$(get_adapter_info ${IFACE} | grep " \(49[0-9][0-9]\|5[0-9]\{3\}\)\(\.0\+\)\? MHz \[${CHANNEL_NUM}\]")
     fi
+    [[ -z "${CHANNEL_INFO}" ]] && return 1
+    [[ "${CHANNEL_INFO}" == *no\ IR* ]] && return 1
+    [[ "${CHANNEL_INFO}" == *disabled* ]] && return 1
+    return 0
 }
 
 # taken from iw/util.c
@@ -379,12 +357,7 @@ is_5ghz_frequency() {
 }
 
 is_wifi_connected() {
-    if [[ $USE_IWCONFIG -eq 0 ]]; then
-        iw dev "$1" link 2>&1 | grep -E '^Connected to' > /dev/null 2>&1 && return 0
-    else
-        iwconfig "$1" 2>&1 | grep -E 'Access Point: [0-9a-fA-F]{2}:' > /dev/null 2>&1 && return 0
-    fi
-    return 1
+    iw dev "$1" link 2>&1 | grep -E '^Connected to' > /dev/null 2>&1
 }
 
 is_macaddr() {
@@ -979,24 +952,20 @@ list_clients() {
        Use --list-running to find it out."
     [[ -z "$CONFDIR" ]] && CONFDIR=$(get_confdir_from_pid "$pid")
 
-    if [[ $USE_IWCONFIG -eq 0 ]]; then
-        local awk_cmd='($1 ~ /Station$/) {print $2}'
-        local client_list=$(iw dev "$wifi_iface" station dump | awk "$awk_cmd")
+    local awk_cmd='($1 ~ /Station$/) {print $2}'
+    local client_list=$(iw dev "$wifi_iface" station dump | awk "$awk_cmd")
 
-        if [[ -z "$client_list" ]]; then
-            echo "No clients connected"
-            return
-        fi
-
-        printf "%-20s %-18s %s\n" "MAC" "IP" "Hostname"
-
-        local mac
-        for mac in $client_list; do
-            print_client $mac
-        done
-    else
-        die "This option is not supported for the current driver."
+    if [[ -z "$client_list" ]]; then
+        echo "No clients connected"
+        return
     fi
+
+    printf "%-20s %-18s %s\n" "MAC" "IP" "Hostname"
+
+    local mac
+    for mac in $client_list; do
+        print_client $mac
+    done
 }
 
 wps_trigger() {
@@ -1717,9 +1686,7 @@ elif [[ $IPV6 -ne 0 ]]; then
     fi
 fi
 
-if [[ $USE_IWCONFIG -eq 0 ]]; then
-    iw dev ${WIFI_IFACE} set power_save off
-fi
+iw dev ${WIFI_IFACE} set power_save off
 
 if [[ $NO_VIRT -eq 0 ]]; then
     VWIFI_IFACE=$(alloc_new_iface ap)
@@ -1792,7 +1759,7 @@ chmod 755 $CONFDIR
 chmod 444 $CONFDIR/pid $CONFDIR/wifi_iface
 mutex_unlock
 
-if [[ -n "$COUNTRY" && $USE_IWCONFIG -eq 0 ]]; then
+if [[ -n "$COUNTRY" ]]; then
     iw reg set "$COUNTRY"
 fi
 
