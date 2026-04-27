@@ -1540,6 +1540,14 @@ if [[ $(get_adapter_kernel_module ${WIFI_IFACE}) =~ ^(8192[cd][ue]|8723a[sue])$ 
     fi
 fi
 
+HOSTAPD_VER=$($HOSTAPD -v 2>&1 | grep -m1 -oE '[0-9]+(\.[0-9]+)*\.[0-9]+')
+version_cmp $HOSTAPD_VER 2.6
+if [[ $? -eq 1 ]]; then
+    echo "ERROR: You are running hostapd $HOSTAPD_VERSION, which has a broken" >&2
+    echo "       random number generator. Please upgrade to v2.6+" >&2
+    exit 1
+fi
+
 if [[ "$SHARE_METHOD" != "nat" && "$SHARE_METHOD" != "bridge" && "$SHARE_METHOD" != "none" ]]; then
     echo "ERROR: Wrong Internet sharing method" >&2
     echo
