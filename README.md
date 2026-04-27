@@ -19,11 +19,9 @@ This project is a fork of the no-longer-maintained [oblique/create_ap](//github.
 * bash (to run this script)
 * util-linux (for getopt)
 * procps or procps-ng
-* hostapd
-  * Version 2.6 or newer is required; earlier versions may
-    fail unpredictably due to [a RNG bug](https://packetstormsecurity.com/files/156573/Hostapd-Insufficient-Entropy.html).
+* hostapd (v2.6 or newer)
 * iproute2
-* iw
+* iw (non-`nl80211` wifi drivers are no longer supported)
 
 ### For 'NATed' or 'None' Internet sharing method
 * dnsmasq
@@ -67,9 +65,6 @@ This project is a fork of the no-longer-maintained [oblique/create_ap](//github.
 
 ### Internet sharing from the same WiFi interface:
     create_ap wlan0 wlan0 MyAccessPoint MyPassPhrase
-
-### Choose a different WiFi adapter driver
-    create_ap --driver rtl871xdrv wlan0 eth0 MyAccessPoint MyPassPhrase
 
 ### No passphrase (open network) using pipe:
     echo -e "MyAccessPoint" | create_ap wlan0 eth0
