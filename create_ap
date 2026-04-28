@@ -1884,7 +1884,7 @@ ieee80211d=1
 EOF
 fi
 
-if [[ -n "$TIMEZONE" ]]; then
+if [[ "$TIMEZONE" -ne 0 ]]; then
     # FIXME: This capability was added to hostapd in
     # https://chromium.googlesource.com/external/w1.fi/cgit/hostap/+/39b97072b2a45551e6f20e6251eeaca269f22a2d%5E%21/#F1
     # with the 'time_zone' variable, but appears to be broken in hostapd v2.9
