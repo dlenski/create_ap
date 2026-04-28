@@ -2226,7 +2226,7 @@ escape() {
 }
 
 QRENCODE_PATH=`which qrencode`
-if [ $? -eq 0 ]; then
+if [ -t 1 -a $? -eq 0 ]; then
     URI="WIFI:S:$(escape $SSID);"
     if [[ -n "$PASSPHRASE" ]]; then
         URI+="T:WPA;P:$(escape $PASSPHRASE);"
